@@ -42,7 +42,7 @@ from telegram.constants import ParseMode
 # ─────────────────────────────────────────────────────────────
 #  CONFIG
 # ─────────────────────────────────────────────────────────────
-BOT_TOKEN       = os.getenv("TELEGRAM_BOT_TOKEN", "YOUR_BOT_TOKEN_HERE")
+BOT_TOKEN       = os.getenv("TELEGRAM_BOT_TOKEN", "7974258604:AAG4MPU9HY5kvHfuVWEr3iz9eOXfNNcJsoE")
 MAX_WORKERS     = 1500          # per-user concurrent connections
 CHECK_TIMEOUT   = 7             # seconds
 MAX_RETRIES     = 1
