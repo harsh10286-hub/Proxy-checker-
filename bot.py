@@ -9,6 +9,8 @@ import secrets
 import aiohttp
 from datetime import datetime
 from collections import defaultdict
+from telegram.ext import Updater, CommandHandler as OldCommandHandler
+
 
 from telegram import Update  # ← works with v20+
 from telegram.constants import ParseMode
@@ -516,19 +518,58 @@ async def plan_assign(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 # ================= MAIN =================
+# ================= MAIN (OLD UPDATER, NO ERROR) =================
 def main():
-    app = Application.builder().token(TOKEN).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("plan", plan_menu))
-    app.add_handler(CommandHandler("ko", kill))
-    app.add_handler(CommandHandler("redeem", redeem))
-    app.add_handler(CommandHandler("key", key_command))
-    app.add_handler(CommandHandler("addadmin", addadmin))
-    app.add_handler(CommandHandler("removeadmin", removeadmin))
-    app.add_handler(CommandHandler("plan", plan_assign))  # overloaded
-    print("🔥 Killer bot is running...")
+    updater = Updater(TOKEN)
+    dp = updater.dispatcher
+    
+    # Convert async handlers to sync + run async in threads
+    def sync_start(update, context):
+        import asyncio
+        loop = asyncio.new_event_loop()
+        loop.run_until_complete(start(update, context))
+    def sync_plan_menu(update, context):
+        import asyncio
+        loop = asyncio.new_event_loop()
+        loop.run_until_complete(plan_menu(update, context))
+    def sync_kill(update, context):
+        import asyncio
+        loop = asyncio.new_event_loop()
+        loop.run_until_complete(kill(update, context))
+    def sync_redeem(update, context):
+        import asyncio
+        loop = asyncio.new_event_loop()
+        loop.run_until_complete(redeem(update, context))
+    def sync_key(update, context):
+        import asyncio
+        loop = asyncio.new_event_loop()
+        loop.run_until_complete(key_command(update, context))
+    def sync_addadmin(update, context):
+        import asyncio
+        loop = asyncio.new_event_loop()
+        loop.run_until_complete(addadmin(update, context))
+    def sync_removeadmin(update, context):
+        import asyncio
+        loop = asyncio.new_event_loop()
+        loop.run_until_complete(removeadmin(update, context))
+    def sync_plan_assign(update, context):
+        import asyncio
+        loop = asyncio.new_event_loop()
+        loop.run_until_complete(plan_assign(update, context))
+    
+    dp.add_handler(OldCommandHandler("start", sync_start))
+    dp.add_handler(OldCommandHandler("plan", sync_plan_menu))
+    dp.add_handler(OldCommandHandler("ko", sync_kill))
+    dp.add_handler(OldCommandHandler("redeem", sync_redeem))
+    dp.add_handler(OldCommandHandler("key", sync_key))
+    dp.add_handler(OldCommandHandler("addadmin", sync_addadmin))
+    dp.add_handler(OldCommandHandler("removeadmin", sync_removeadmin))
+    dp.add_handler(OldCommandHandler("plan", sync_plan_assign))
+    
+    print("🔥 Killer bot is running (old Updater – no AttributeError)...")
     print(f"👑 Owner ID: {OWNER_ID}")
-    app.run_polling()
+    updater.start_polling()
+    updater.idle()
 
 if __name__ == "__main__":
     main()
